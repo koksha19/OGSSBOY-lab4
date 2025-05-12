@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/roman-mazur/architecture-practice-4-template/httptools"
@@ -22,7 +23,7 @@ var (
 )
 
 var (
-	timeout     = time.Duration(*timeoutSec) * time.Second
+	timeout     time.Duration
 	serversPool = []string{
 		"server1:8080",
 		"server2:8080",
@@ -45,10 +46,8 @@ func health(dst string) bool {
 	if err != nil {
 		return false
 	}
-	if resp.StatusCode != http.StatusOK {
-		return false
-	}
-	return true
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
@@ -84,22 +83,64 @@ func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
 	}
 }
 
+type backend struct {
+	address   string
+	available bool
+}
+
+var (
+	backends      []backend
+	backendsMutex sync.RWMutex
+	currentIndex  int
+)
+
+func updateHealthStatuses() {
+	for i := range backends {
+		addr := backends[i].address
+		ok := health(addr)
+		backendsMutex.Lock()
+		backends[i].available = ok
+		backendsMutex.Unlock()
+		log.Println(addr, "healthy:", ok)
+	}
+}
+
+func getNextAvailableBackend() (string, bool) {
+	backendsMutex.RLock()
+	defer backendsMutex.RUnlock()
+
+	n := len(backends)
+	for i := 0; i < n; i++ {
+		idx := (currentIndex + i) % n
+		if backends[idx].available {
+			currentIndex = (idx + 1) % n
+			return backends[idx].address, true
+		}
+	}
+	return "", false
+}
+
 func main() {
 	flag.Parse()
+	timeout = time.Duration(*timeoutSec) * time.Second
 
-	// TODO: Використовуйте дані про стан сервера, щоб підтримувати список тих серверів, яким можна відправляти запит.
-	for _, server := range serversPool {
-		server := server
-		go func() {
-			for range time.Tick(10 * time.Second) {
-				log.Println(server, "healthy:", health(server))
-			}
-		}()
+	for _, s := range serversPool {
+		backends = append(backends, backend{address: s, available: true})
 	}
 
+	go func() {
+		for range time.Tick(10 * time.Second) {
+			updateHealthStatuses()
+		}
+	}()
+
 	frontend := httptools.CreateServer(*port, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		// TODO: Реалізуйте свій алгоритм балансувальника.
-		forward(serversPool[0], rw, r)
+		addr, ok := getNextAvailableBackend()
+		if !ok {
+			http.Error(rw, "No available backends", http.StatusServiceUnavailable)
+			return
+		}
+		forward(addr, rw, r)
 	}))
 
 	log.Println("Starting load balancer...")
