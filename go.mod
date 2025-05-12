@@ -1,3 +1,3 @@
-module github.com/roman-mazur/architecture-practice-4-template
+module github.com/koksha19/OGSSBOY-lab4
 
 go 1.24

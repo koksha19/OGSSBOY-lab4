@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/roman-mazur/architecture-practice-4-template/httptools"
-	"github.com/roman-mazur/architecture-practice-4-template/signal"
+	"github.com/koksha19/OGSSBOY-lab4/httptools"
+	"github.com/koksha19/OGSSBOY-lab4/signal"
 )
 
 var (
